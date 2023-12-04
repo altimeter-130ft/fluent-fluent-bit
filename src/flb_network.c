@@ -401,7 +401,9 @@ static int net_connect_async(int fd,
     int socket_errno;
     uint32_t mask;
     char so_error_buf[256];
+#ifdef FLB_HAVE_GNU_STRERROR_T
     char *str;
+#endif
     struct flb_upstream *u;
 
     u = u_conn->upstream;
@@ -523,9 +525,17 @@ static int net_connect_async(int fd,
             }
 
             /* Connection is broken, not much to do here */
+#ifdef FLB_HAVE_GNU_STRERROR_T
             str = strerror_r(error, so_error_buf, sizeof(so_error_buf));
+#else
+            strerror_r(error, so_error_buf, sizeof(so_error_buf));
+#endif
             flb_error("[net] TCP connection failed: %s:%i (%s)",
+#ifdef FLB_HAVE_GNU_STRERROR_T
                       u->tcp_host, u->tcp_port, str);
+#else
+                      u->tcp_host, u->tcp_port, so_error_buf);
+#endif
             return -1;
         }
     }

@@ -1082,6 +1082,26 @@ if(FLB_INOTIFY)
   endif()
 endif()
 
+#
+# strerror_r(3) return value type.
+#
+# Do not depend on the _POSIX_C_SOURCE and _GNU_SOURCE macros; the latter
+# depends on glibc.
+#
+# XXX Alternative solution by Gnulib?
+#
+check_c_source_compiles("
+    #include <errno.h>
+    #include <string.h>
+    int main() {
+        char buf[256], *p;
+        p = strerror_r(EINVAL, buf, sizeof(buf));
+		return 0;
+    }" FLB_HAVE_GNU_STRERROR_R)
+if(FLB_HAVE_GNU_STRERROR_R)
+  FLB_DEFINITION(FLB_HAVE_GNU_STRERROR_R)
+endif()
+
 include(CheckSymbolExists)
 
 # Check for getentropy(3)

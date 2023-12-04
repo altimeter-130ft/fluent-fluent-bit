@@ -335,6 +335,9 @@ static FLB_INLINE int net_io_write_async(struct flb_coro *co,
     size_t total = 0;
     size_t to_send;
     char so_error_buf[256];
+#ifdef FLB_HAVE_GNU_STRERROR_T
+    char *str;
+#endif
     struct mk_event event_backup;
     int event_restore_needed;
 
@@ -422,12 +425,20 @@ retry:
 
                 if (error != 0) {
                     /* Connection is broken, not much to do here */
-                    strerror_r(error, so_error_buf, sizeof(so_error_buf) - 1);
+#ifdef FLB_HAVE_GNU_STRERROR_T
+                    str = strerror_r(error, so_error_buf, sizeof(so_error_buf));
+#else
+                    strerror_r(error, so_error_buf, sizeof(so_error_buf));
+#endif
 
                     flb_error("[io fd=%i] error sending data to: %s (%s)",
                               connection->fd,
                               flb_connection_get_remote_address(connection),
+#ifdef FLB_HAVE_GNU_STRERROR_T
+                              str);
+#else
                               so_error_buf);
+#endif
 
                     *out_len = total;
 

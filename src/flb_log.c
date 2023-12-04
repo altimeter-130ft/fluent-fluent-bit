@@ -669,9 +669,21 @@ void flb_log_print(int type, const char *file, int line, const char *fmt, ...)
 int flb_errno_print(int errnum, const char *file, int line)
 {
     char buf[256];
+#ifdef FLB_HAVE_GNU_STRERROR_T
+    char *str;
+#endif
 
-    strerror_r(errnum, buf, sizeof(buf) - 1);
-    flb_error("[%s:%i errno=%i] %s", file, line, errnum, buf);
+#ifdef FLB_HAVE_GNU_STRERROR_T
+    str = strerror_r(errnum, buf, sizeof(buf));
+#else
+    strerror_r(errnum, buf, sizeof(buf));
+#endif
+    flb_error("[%s:%i errno=%i] %s", file, line, errnum,
+#ifdef FLB_HAVE_GNU_STRERROR_T
+        str);
+#else
+        buf);
+#endif
     return 0;
 }
 
