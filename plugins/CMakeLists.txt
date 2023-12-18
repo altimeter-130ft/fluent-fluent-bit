@@ -279,6 +279,10 @@ REGISTER_IN_PLUGIN("in_lib")
 REGISTER_IN_PLUGIN("in_forward")
 REGISTER_IN_PLUGIN("in_random")
 
+if(FLB_IN_SYSCTL)
+  REGISTER_IN_PLUGIN("in_sysctl")
+endif()
+
 # PROCESSORS
 # ==========
 REGISTER_PROCESSOR_PLUGIN("processor_labels")

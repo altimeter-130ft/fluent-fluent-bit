@@ -210,6 +210,7 @@ option(FLB_IN_ELASTICSEARCH            "Enable Elasticsearch (Bulk API) input pl
 option(FLB_IN_CALYPTIA_FLEET           "Enable Calyptia Fleet input plugin"           Yes)
 option(FLB_IN_SPLUNK                   "Enable Splunk HTTP HEC input plugin"          Yes)
 option(FLB_IN_PROCESS_EXPORTER_METRICS "Enable process exporter metrics input plugin" Yes)
+option(FLB_IN_SYSCTL                   "Enable sysctl input plugin"                   Yes)
 option(FLB_OUT_AZURE                   "Enable Azure output plugin"                   Yes)
 option(FLB_OUT_AZURE_BLOB              "Enable Azure output plugin"                   Yes)
 option(FLB_OUT_AZURE_LOGS_INGESTION    "Enable Azure Logs Ingestion output plugin"    Yes)
@@ -322,6 +323,7 @@ if(FLB_ALL)
   set(FLB_IN_NGINX_STATUS 1)
   set(FLB_IN_EXEC         1)
   set(FLB_IN_UNIX_SOCKET  1)
+  set(FLB_IN_SYSCTL       1)
 
   # Output plugins
   set(FLB_OUT_ES          1)
