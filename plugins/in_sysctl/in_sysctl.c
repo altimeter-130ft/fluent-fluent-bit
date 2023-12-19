@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <math.h>
 #include <signal.h>
+#include <sys/sysctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -42,6 +43,7 @@
 #include <msgpack.h>
 
 #include "in_sysctl.h"
+#include "in_sysctl_tree.h"
 
 /*
  * The internal plugin data, for the use in this source only.
@@ -110,6 +112,7 @@ static int in_sysctl_collect(
     msgpack_sbuffer msg_sb;
     msgpack_packer msg_pk;
     struct timespec ts;
+    struct in_sysctl_tree_node *root;
 
     ictx = (struct in_sysctl_internal *)in_context;
     const struct in_sysctl ctx_exported = {
@@ -117,6 +120,11 @@ static int in_sysctl_collect(
         .isc_iscx = &ictx->isc_iscx,
     };
     const struct in_sysctl *ctx = &ctx_exported;
+
+    root = in_sysctl_tree_node_alloc_root();
+    if (NULL == root) {
+        goto err;
+    }
 
     flb_time_get(&timestamp);
 
@@ -132,13 +140,21 @@ static int in_sysctl_collect(
 
     mk_list_foreach(name, ctx->isc_iscc->iscc_names) {
         name_e = mk_list_entry(name, struct flb_slist_entry, _head);
-        ret = in_sysctl_collect_by_name(ctx, name_e->str, &msg_pk);
+        ret = in_sysctl_collect_by_name(ctx, name_e->str, root);
         if (0 != ret) {
             flb_plg_error(
                 ctx->isc_iscx->iscx_input,
                 "name = %s, ret = %d",
                 name_e->str, ret);
         }
+    }
+
+    /* XXX For debugging. */
+    in_sysctl_tree_node_log(root, ctx);
+
+    ret = in_sysctl_tree_node_pack(ctx, root, &msg_pk);
+    if (0 != ret) {
+        goto err;
     }
 
     ret = flb_log_event_encoder_set_body_from_raw_msgpack(
@@ -192,10 +208,13 @@ static int in_sysctl_collect(
         kill(getpid(), SIGTERM);
     }
 
+    in_sysctl_tree_node_free(root);
+
     return 0;
 
 err:
     msgpack_sbuffer_destroy(&msg_sb);
+    in_sysctl_tree_node_free(root);
 
     return -1;
 }
@@ -384,6 +403,16 @@ static struct flb_config_map sysctl_config_map[] = {
     FLB_CONFIG_MAP_STR, "content", "values",
     0, FLB_TRUE, offsetof(struct in_sysctl_config, iscc_content_str),
     "content. (values, es_explicit_mapping)"
+   },
+   {
+    FLB_CONFIG_MAP_STR, "es_time_key", "@timestamp",
+    0, FLB_TRUE, offsetof(struct in_sysctl_config, iscc_es_time_key),
+    "Elasticsearch timestamp field name. (default: @timestamp)"
+   },
+   {
+    FLB_CONFIG_MAP_STR, "es_time_format", "date_time",
+    0, FLB_TRUE, offsetof(struct in_sysctl_config, iscc_es_time_format),
+    "Elasticsearch timestamp format. (default: date_time)"
    },
    {0}
 };

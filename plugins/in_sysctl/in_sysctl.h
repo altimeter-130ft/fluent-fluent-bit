@@ -22,9 +22,8 @@
 
 struct flb_input_instance;
 struct flb_log_event_encoder;
+struct in_sysctl_tree_node;
 struct mk_list;
-/* XXX */
-struct msgpack_packer;
 
 /*
  * The output data format.
@@ -86,6 +85,12 @@ struct in_sysctl_config {
      */
 	flb_sds_t               iscc_content_str;
     enum in_sysctl_content  iscc_content;
+
+	/* Timestamp field name in Elasticsearch. */
+	flb_sds_t               iscc_es_time_key;
+
+	/* Timestamp format in Elasticsearch. */
+	flb_sds_t               iscc_es_time_format;
 };
 
 /*
@@ -120,6 +125,6 @@ struct in_sysctl {
 int in_sysctl_collect_by_name(
     const struct in_sysctl * restrict ctx,
     const char * restrict name,
-    struct msgpack_packer * restrict msg_pk);
+    struct in_sysctl_tree_node * restrict root);
 
 #endif

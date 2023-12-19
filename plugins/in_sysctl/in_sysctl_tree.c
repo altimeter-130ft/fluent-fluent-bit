@@ -39,6 +39,7 @@
 #define KEY_DELIMITER   '.'
 
 #define ES_EXPLICIT_MAPPING_FIELDS      "fields"
+#define ES_EXPLICIT_MAPPING_FORMAT      "format"
 #define ES_EXPLICIT_MAPPING_PROPERTIES  "properties"
 #define ES_EXPLICIT_MAPPING_TYPE        "type"
 
@@ -677,6 +678,38 @@ int in_sysctl_tree_node_pack(
 
     switch (node->istn_type) {
     case NODETYPE_ROOT:
+        if (ISC_CNT_ES_EXPLICIT_MAPPING == ctx->isc_iscc->iscc_content) {
+            /* Add the timestamp. */
+            ret = in_sysctl_tree_node_pack_string(
+                ctx->isc_iscc->iscc_es_time_key, msg_pk);
+            in_sysctl_tree_node_pack_value_check_result(
+                ret, node, in_sysctl_tree_node_pack_string);
+
+            ret = msgpack_pack_map(msg_pk, 2);
+            in_sysctl_tree_node_pack_value_check_result(
+                ret, node, msgpack_pack_map);
+
+            ret = in_sysctl_tree_node_pack_string(
+                ES_EXPLICIT_MAPPING_TYPE, msg_pk);
+            in_sysctl_tree_node_pack_value_check_result(
+                ret, node, in_sysctl_tree_node_pack_string);
+            ret = in_sysctl_tree_node_pack_string(
+                "date", msg_pk);
+            in_sysctl_tree_node_pack_value_check_result(
+                ret, node, in_sysctl_tree_node_pack_string);
+
+            ret = in_sysctl_tree_node_pack_string(
+                ES_EXPLICIT_MAPPING_FORMAT, msg_pk);
+            in_sysctl_tree_node_pack_value_check_result(
+                ret, node, in_sysctl_tree_node_pack_string);
+            ret = in_sysctl_tree_node_pack_string(
+                ctx->isc_iscc->iscc_es_time_format, msg_pk);
+            in_sysctl_tree_node_pack_value_check_result(
+                ret, node, in_sysctl_tree_node_pack_string);
+        }
+
+        /* FALLTHROUGH */
+
     case NODETYPE_NODE:
         mk_list_foreach(child, &node->istn_value.istnv_node) {
             child_node = mk_list_entry(child, struct in_sysctl_tree_node, istn_glue);
@@ -940,6 +973,9 @@ static int in_sysctl_tree_node_pack_es_explicit_mapping(
                 ret = in_sysctl_tree_node_pack_string(ES_EXPLICIT_MAPPING_PROPERTIES, msg_pk);
                 in_sysctl_tree_node_pack_value_check_result(
                     ret, node, in_sysctl_tree_node_pack_string);
+            } else /* NODETYPE_ROOT == node->istn_type */ {
+                /* Add the timestamp. */
+                children_num++;
             }
 
             ret = msgpack_pack_map(msg_pk, children_num);

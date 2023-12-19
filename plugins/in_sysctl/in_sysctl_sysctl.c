@@ -38,7 +38,7 @@
 #include "in_sysctl_tree.h"
 
 #define CTL_EXTRANAME   (2)
-#define BUF_LEN         (256)
+#define BUF_LEN         ((size_t)256)
 
 /*
  * The OID with the extra spaces for the sysctl(3) commands.
@@ -115,6 +115,7 @@ static int in_sysctl_collect_value(
     const struct in_sysctl_oid * restrict oid,
     struct in_sysctl_value * restrict * restrict valuep);
 static size_t in_sysctl_type_integer_size(int type);
+static int in_sysctl_kind_format_supported(int kind, const char *format);
 
 /*
  * Collect the sysctl(3) value of the given string name.
@@ -122,22 +123,29 @@ static size_t in_sysctl_type_integer_size(int type);
 int in_sysctl_collect_by_name(
     const struct in_sysctl * restrict ctx,
     const char * restrict name,
-    struct msgpack_packer * restrict msg_pk)
+    struct in_sysctl_tree_node * restrict root)
 {
     int ret;
-    char buf[BUF_LEN], *errbufp;
+    char *buf, *errbufp;
     struct in_sysctl_oid oid;
-    struct in_sysctl_tree_node *root;
     struct in_sysctl_value * restrict value;
 
     value = NULL;
+    buf = flb_sds_create_size(BUF_LEN);
+    if (NULL == buf) {
+        flb_plg_error(
+            ctx->isc_iscx->iscx_input,
+            "flb_sds_create_size(%zu): errno = %d",
+            BUF_LEN, errno);
+        goto err;
+    }
 
     ret = in_sysctl_name_to_oid(name, &oid);
     if (0 != ret) {
 #ifdef FLB_HAVE_GNU_STRERROR_R
-        errbufp = strerror_r(errno, buf, sizeof(buf));
+        errbufp = strerror_r(errno, buf, BUF_LEN);
 #else
-        strerror_r(errno, buf, sizeof(buf));
+        strerror_r(errno, buf, BUF_LEN);
         errbufp = buf;
 #endif
         flb_plg_error(
@@ -147,17 +155,12 @@ int in_sysctl_collect_by_name(
         goto err;
     }
 
-    root = in_sysctl_tree_node_alloc_root();
-    if (NULL == root) {
-        goto err;
-    }
-
     value = in_sysctl_value_alloc();
     if (NULL == value) {
 #ifdef FLB_HAVE_GNU_STRERROR_R
-        errbufp = strerror_r(errno, buf, sizeof(buf));
+        errbufp = strerror_r(errno, buf, BUF_LEN);
 #else
-        strerror_r(errno, buf, sizeof(buf));
+        strerror_r(errno, buf, BUF_LEN);
         errbufp = buf;
 #endif
         flb_plg_error(ctx->isc_iscx->iscx_input,
@@ -171,21 +174,14 @@ int in_sysctl_collect_by_name(
         goto err;
     }
 
-    /* XXX For debugging. */
-    in_sysctl_tree_node_log(root, ctx);
-
-    ret = in_sysctl_tree_node_pack(ctx, root, msg_pk);
-    if (0 != ret) {
-        goto err;
-    }
-
-    in_sysctl_tree_node_free(root);
     in_sysctl_value_free(value);
+    flb_sds_destroy(buf);
 
     return ret;
 
 err:
     in_sysctl_value_free(value);
+    flb_sds_destroy(buf);
     return -1;
 }
 
@@ -386,6 +382,31 @@ err:
     return -1;
 }
 
+#ifdef FLB_HAVE_GNU_STRERROR_R
+#define do_strerror_r(errno, errbuf, errlen, errbufp)\
+    do {\
+        (errbufp) = strerror_r((errno), (errbuf), (errlen));\
+    } while(0)
+#else
+#define do_strerror_r(errno, errbuf, errlen, errbufp)\
+    do {\
+        strerror_r((errno), (errbuf), (errlen));\
+        (errbufp) = (errbuf);\
+    } while(0)
+#endif
+#define flb_sds_alloc_buf(buf, len, errbuf, errbufp)\
+    do {\
+        (buf) = flb_sds_create_size((len));\
+        if (NULL == (buf)) {\
+            do_strerror_r((errno), (errbuf), (len), (errbufp));\
+            flb_plg_error(\
+                ctx->isc_iscx->iscx_input,\
+                "flb_sds_create_size(%zu): %s",\
+                (len), (errbufp));\
+            goto err;\
+        }\
+    } while (0)\
+
 /*
  * Collect the sysctl(3) value of the given OID.
  *
@@ -400,25 +421,41 @@ static int in_sysctl_collect_by_oid(
 {
     int ret;
     u_int kind;
-    char buf[BUF_LEN], *errbufp;
-    char namebuf[BUF_LEN], oidbuf[BUF_LEN], formatbuf[BUF_LEN], nextnamebuf[BUF_LEN];
+    char *buf, *errbufp;
+    char *namebuf, *oidbuf, *formatbuf, *nextnamebuf;
     size_t int_size;
     struct in_sysctl_oid oid_this, oid_next;
     struct in_sysctl_tree_node *node;
 
-    ret = in_sysctl_oid_to_name(oid, namebuf, sizeof(namebuf));
+    buf = namebuf = oidbuf = formatbuf = nextnamebuf = NULL;
+
+    buf = flb_sds_create_size(BUF_LEN);
+    if (NULL == buf) {
+        flb_plg_error(
+            ctx->isc_iscx->iscx_input,
+            "flb_sds_create_size(%zu): errno = %d",
+            BUF_LEN, errno);
+        goto err;
+    }
+
+    flb_sds_alloc_buf(namebuf, BUF_LEN, buf, errbufp);
+    flb_sds_alloc_buf(oidbuf, BUF_LEN, buf, errbufp);
+    flb_sds_alloc_buf(formatbuf, BUF_LEN, buf, errbufp);
+    flb_sds_alloc_buf(nextnamebuf, BUF_LEN, buf, errbufp);
+
+    ret = in_sysctl_oid_to_name(oid, namebuf, BUF_LEN);
     if (0 != ret) {
         /* TODO: the error log. */
         goto err;
     }
 
-    ret = in_sysctl_oid_format(oid, oidbuf, sizeof(oidbuf));
+    ret = in_sysctl_oid_format(oid, oidbuf, BUF_LEN);
     if (0 != ret) {
         /* TODO: the error log. */
         goto err;
     }
 
-    ret = in_sysctl_oid_kind_format(oid, &kind, formatbuf, sizeof(formatbuf));
+    ret = in_sysctl_oid_kind_format(oid, &kind, formatbuf, BUF_LEN);
     if (0 != ret) {
         /* TODO: the error log. */
         goto err;
@@ -431,6 +468,14 @@ static int in_sysctl_collect_by_oid(
         oidbuf,
         kind,
         formatbuf);
+
+    if (!in_sysctl_kind_format_supported(kind & CTLTYPE, formatbuf)) {
+        flb_plg_info(
+            ctx->isc_iscx->iscx_input,
+            "skipping OID %s, unsupported type/format",
+            namebuf);
+        goto done;
+    }
 
     node = in_sysctl_tree_node_alloc(kind & CTLTYPE, namebuf);
     if (NULL == node) {
@@ -459,9 +504,9 @@ static int in_sysctl_collect_by_oid(
                     break;
                 }
 #ifdef FLB_HAVE_GNU_STRERROR_R
-                errbufp = strerror_r(errno, buf, sizeof(buf));
+                errbufp = strerror_r(errno, buf, BUF_LEN);
 #else
-                strerror_r(errno, buf, sizeof(buf));
+                strerror_r(errno, buf, BUF_LEN);
                 errbufp = buf;
 #endif
                 flb_plg_error(
@@ -475,7 +520,7 @@ static int in_sysctl_collect_by_oid(
                 break;
             }
 
-            ret = in_sysctl_oid_to_name(&oid_next, nextnamebuf, sizeof(nextnamebuf));
+            ret = in_sysctl_oid_to_name(&oid_next, nextnamebuf, BUF_LEN);
             if (0 != ret) {
                 /* TODO: the error log. */
                 goto err;
@@ -488,9 +533,9 @@ static int in_sysctl_collect_by_oid(
                 valuep);
             if (0 != ret) {
 #ifdef FLB_HAVE_GNU_STRERROR_R
-                errbufp = strerror_r(errno, buf, sizeof(buf));
+                errbufp = strerror_r(errno, buf, BUF_LEN);
 #else
-                strerror_r(errno, buf, sizeof(buf));
+                strerror_r(errno, buf, BUF_LEN);
                 errbufp = buf;
 #endif
                 flb_plg_error(
@@ -501,7 +546,7 @@ static int in_sysctl_collect_by_oid(
             }
         }
 
-        return 0;
+        goto done;
     }
 
     ret = in_sysctl_collect_value(oid, valuep);
@@ -512,7 +557,10 @@ static int in_sysctl_collect_by_oid(
 
     int_size = in_sysctl_type_integer_size(kind & CTLTYPE);
     if ((size_t)-1 != int_size) {
-        /* An integer type can be simply copied in general. */
+        /*
+         * An integer type can be simply copied in general.
+         * TODO: Double.
+         */
         if (int_size != (*valuep)->iscv_validlen) {
             flb_plg_error(
                 ctx->isc_iscx->iscx_input,
@@ -527,7 +575,7 @@ static int in_sysctl_collect_by_oid(
 
         /* TODO: Handle the "K" format, the scaled fixed point. */
 
-        return 0;
+        goto done;
     }
 
     if (NODETYPE_STRING == (kind & CTLTYPE)) {
@@ -536,12 +584,25 @@ static int in_sysctl_collect_by_oid(
             in_sysctl_value_buffer_const(*valuep),
             (*valuep)->iscv_validlen);
 
-        return 0;
+        goto done;
     }
 
+    /* TODO: Opaque. */
+
+done:
+    flb_sds_destroy(buf);
+    flb_sds_destroy(namebuf);
+    flb_sds_destroy(oidbuf);
+    flb_sds_destroy(formatbuf);
+    flb_sds_destroy(nextnamebuf);
     return 0;
 
 err:
+    flb_sds_destroy(buf);
+    flb_sds_destroy(namebuf);
+    flb_sds_destroy(oidbuf);
+    flb_sds_destroy(formatbuf);
+    flb_sds_destroy(nextnamebuf);
     return -1;
 }
 
@@ -694,4 +755,20 @@ static size_t in_sysctl_type_integer_size(int type)
     }
 
     return (size_t)-1;
+}
+
+/*
+ * Check if the sysctl(3) kind and format is supported.
+ */
+static int in_sysctl_kind_format_supported(int kind, const char *format)
+{
+    if (CTLTYPE_OPAQUE != (kind & CTLTYPE)) {
+        return 1;
+    }
+
+    /*
+     * The opaque type is not supported for now.
+     */
+
+    return 0;
 }
